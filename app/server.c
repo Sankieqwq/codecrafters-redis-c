@@ -123,14 +123,14 @@ void send_ping(void *client_fd) {
         for (int i = len; i > 0; i /= 10) {
           cnt++;
         }
-        printf("%d", cnt);
+        // printf("%d", cnt);
         sprintf(message, "$%d\r\n%s\r\n", len, val->value);
         send(client, message, len + cnt + 5, 0);
       }
     }
   }
 }
-int main() {
+int main(int argc, char **argv) {
   // Disable output buffering
   setbuf(stdout, NULL);
 
@@ -163,6 +163,11 @@ int main() {
       .sin_port = htons(6379),
       .sin_addr = {htonl(INADDR_ANY)},
   };
+  if (argc == 3) {
+    if (strcmp(argv[1], "--port") == 0) {
+      serv_addr.sin_port = htons(atoi(argv[2]));
+    }
+  }
 
   if (bind(server_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) != 0) {
     printf("Bind failed: %s \n", strerror(errno));
