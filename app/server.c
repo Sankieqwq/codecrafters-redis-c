@@ -58,8 +58,13 @@ int main() {
   int client_fd =
       accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
   printf("Client connected\n");
+  
+  char buffer[1024];
   char *message = "+PONG\r\n";
-  send(client_fd, message, strlen(message), 0);
+  while (read(client_fd, buffer, 1024) != 0) {
+    send(client_fd, message, strlen(message), 0);
+  }
+
   close(server_fd);
 
   return 0;
