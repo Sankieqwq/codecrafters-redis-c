@@ -8,6 +8,11 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+typedef struct x {
+  char key[128];
+  char value[128];
+} map;
+
 int parser(char **read, char result[][128], int size_read) {
   int res_idx = 0;
   for (int i = 0; i < size_read; i++) {
@@ -34,6 +39,9 @@ int parser(char **read, char result[][128], int size_read) {
 void send_ping(void *client_fd) {
   int client = *(int *)client_fd;
   char buffer[1024];
+  map *redis[10000];
+  int redis_size = 0;
+
   while (read(client, buffer, 1024) != 0) {
     char *command[1024];
     int idx = 0;
@@ -42,16 +50,42 @@ void send_ping(void *client_fd) {
       idx++;
       command[idx] = strtok(NULL, "$");
     }
+
     char res[128][128];
     parser(command, res, idx);
+
     if (strcasecmp(res[0], "PING") == 0) {
-    char *message = "+PONG\r\n";
-    send(client, message, strlen(message), 0);
+      char *message = "+PONG\r\n";
+      send(client, message, strlen(message), 0);
     } else if (strcasecmp(res[0], "ECHO") == 0) {
       int len = strlen(res[1]);
       char message[1024] = {0};
       sprintf(message, "$%d\r\n%s\r\n", len, res[1]);
       send(client, message, len + 6, 0);
+    } else if (strcasecmp(res[0], "SET") == 0) {
+      map *new_val = (map *)malloc(sizeof(map));
+      strcpy(new_val->key, res[1]);
+      strcpy(new_val->value, res[2]);
+      redis[redis_size++] = new_val;
+      char *message = "+OK\r\n";
+      send(client, message, strlen(message), 0);
+    } else if (strcasecmp(res[0], "GET") == 0) {
+      map *val = NULL;
+      for (int i = 0; i < redis_size; i++) {
+        if (strcmp(res[1], redis[i]->key) == 0) {
+          val = redis[i];
+          break;
+        }
+      }
+      char message[1024] = {0};
+      if (val == NULL) {
+        char *message = "$-1\r\n";
+        send(client, message, strlen(message), 0);
+      } else {
+        int len = strlen(val->value);
+        sprintf(message, "$%d\r\n%s\r\n", len, val->value);
+        send(client, message, len + 6, 0);
+      }
     }
   }
 }
