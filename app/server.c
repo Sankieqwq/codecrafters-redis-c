@@ -5,13 +5,32 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 typedef struct x {
   char key[128];
   char value[128];
+  struct timeval *ttl;
 } map;
+
+int compareTimeval(const struct timeval *tv1, const struct timeval *tv2) {
+  if (tv1->tv_sec < tv2->tv_sec) {
+    return -1;
+  } else if (tv1->tv_sec > tv2->tv_sec) {
+    return 1;
+  } else {
+    if (tv1->tv_usec < tv2->tv_usec) {
+      return -1;
+    } else if (tv1->tv_usec > tv2->tv_usec) {
+      return 1;
+    } else {
+      return 0;
+    }
+  }
+}
 
 int parser(char **read, char result[][128], int size_read) {
   int res_idx = 0;
@@ -66,12 +85,29 @@ void send_ping(void *client_fd) {
       map *new_val = (map *)malloc(sizeof(map));
       strcpy(new_val->key, res[1]);
       strcpy(new_val->value, res[2]);
+      if (strcasecmp(res[3], "PX") == 0) {
+        struct timeval tv;
+        long long millsec = atoi(res[4]);
+        gettimeofday(&tv, NULL);
+        tv.tv_sec += millsec / 1000LL;
+        tv.tv_usec += (millsec % 1000LL) * 1000LL;
+        new_val->ttl = &tv;
+      } else {
+        new_val->ttl = NULL;
+      }
       redis[redis_size++] = new_val;
       char *message = "+OK\r\n";
       send(client, message, strlen(message), 0);
     } else if (strcasecmp(res[0], "GET") == 0) {
       map *val = NULL;
       for (int i = 0; i < redis_size; i++) {
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        if (redis[i]->ttl != NULL && compareTimeval(redis[i]->ttl, &tv) < 0) {
+          redis[i] = redis[--redis_size];
+          i--;
+          continue;
+        }
         if (strcmp(res[1], redis[i]->key) == 0) {
           val = redis[i];
           break;
@@ -83,8 +119,13 @@ void send_ping(void *client_fd) {
         send(client, message, strlen(message), 0);
       } else {
         int len = strlen(val->value);
+        int cnt = 0;
+        for (int i = len; i > 0; i /= 10) {
+          cnt++;
+        }
+        printf("%d", cnt);
         sprintf(message, "$%d\r\n%s\r\n", len, val->value);
-        send(client, message, len + 6, 0);
+        send(client, message, len + cnt + 5, 0);
       }
     }
   }
