@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <getopt.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <pthread.h>
@@ -10,11 +11,19 @@
 #include <sys/time.h>
 #include <unistd.h>
 
+extern char *optarg;
+extern int optind, opterr, optopt;
+
 typedef struct x {
   char key[128];
   char value[128];
   struct timeval *ttl;
 } map;
+
+typedef struct y {
+  int client_fd;
+  int is_master;
+} client;
 
 int compareTimeval(const struct timeval *tv1, const struct timeval *tv2) {
   if (tv1->tv_sec < tv2->tv_sec) {
@@ -56,12 +65,13 @@ int parser(char **read, char result[][128], int size_read) {
 }
 
 void send_ping(void *client_fd) {
-  int client = *(int *)client_fd;
+  client c = *(client *)client_fd;
+  int client_f = c.client_fd;
   char buffer[1024];
   map *redis[10000];
   int redis_size = 0;
 
-  while (read(client, buffer, 1024) != 0) {
+  while (read(client_f, buffer, 1024) != 0) {
     char *command[1024];
     int idx = 0;
     command[0] = strtok(buffer, "$");
@@ -75,12 +85,12 @@ void send_ping(void *client_fd) {
 
     if (strcasecmp(res[0], "PING") == 0) {
       char *message = "+PONG\r\n";
-      send(client, message, strlen(message), 0);
+      send(client_f, message, strlen(message), 0);
     } else if (strcasecmp(res[0], "ECHO") == 0) {
       int len = strlen(res[1]);
       char message[1024] = {0};
       sprintf(message, "$%d\r\n%s\r\n", len, res[1]);
-      send(client, message, len + 6, 0);
+      send(client_f, message, len + 6, 0);
     } else if (strcasecmp(res[0], "SET") == 0) {
       map *new_val = (map *)malloc(sizeof(map));
       strcpy(new_val->key, res[1]);
@@ -97,7 +107,7 @@ void send_ping(void *client_fd) {
       }
       redis[redis_size++] = new_val;
       char *message = "+OK\r\n";
-      send(client, message, strlen(message), 0);
+      send(client_f, message, strlen(message), 0);
     } else if (strcasecmp(res[0], "GET") == 0) {
       map *val = NULL;
       for (int i = 0; i < redis_size; i++) {
@@ -116,25 +126,35 @@ void send_ping(void *client_fd) {
       char message[1024] = {0};
       if (val == NULL) {
         char *message = "$-1\r\n";
-        send(client, message, strlen(message), 0);
+        send(client_f, message, strlen(message), 0);
       } else {
         int len = strlen(val->value);
         int cnt = 0;
         for (int i = len; i > 0; i /= 10) {
           cnt++;
         }
-        // printf("%d", cnt);
         sprintf(message, "$%d\r\n%s\r\n", len, val->value);
-        send(client, message, len + cnt + 5, 0);
+        send(client_f, message, len + cnt + 5, 0);
       }
     } else if (strcasecmp(res[0], "INFO") == 0) {
       if (strcasecmp(res[1], "replication") == 0) {
-        char *message = "$11\r\nrole:master\r\n";
-        send(client, message, strlen(message), 0);
+        char *message;
+        if (c.is_master) {
+          message = "$11\r\nrole:master\r\n";
+        } else {
+          message = "$10\r\nrole:slave\r\n";
+        }
+        send(client_f, message, strlen(message), 0);
       }
     }
   }
 }
+
+static struct option long_options[] = {
+    {"port", required_argument, NULL, 'p'},
+    {"replicaof", required_argument, NULL, 'r'},
+};
+
 int main(int argc, char **argv) {
   // Disable output buffering
   setbuf(stdout, NULL);
@@ -142,7 +162,26 @@ int main(int argc, char **argv) {
   // You can use print statements as follows for debugging, they'll be visible
   // when running tests.
   printf("Logs from your program will appear here!\n");
+  int index = 0;
+  int c = 0;
+  int port = 6379;
+  int master = 1;
 
+  while (EOF != (c = getopt_long(argc, argv, "p:r:", long_options, &index))) {
+    switch (c) {
+    case 'p':
+      port = atoi(argv[2]);
+      break;
+    case 'r':
+      master = 0;
+      break;
+    case '?':
+      printf("unknow option:%c\n", optopt);
+      break;
+    default:
+      break;
+    }
+  }
   // Uncomment this block to pass the first stage
   //
   int server_fd, client_addr_len;
@@ -165,14 +204,9 @@ int main(int argc, char **argv) {
 
   struct sockaddr_in serv_addr = {
       .sin_family = AF_INET,
-      .sin_port = htons(6379),
+      .sin_port = htons(port),
       .sin_addr = {htonl(INADDR_ANY)},
   };
-  if (argc == 3) {
-    if (strcmp(argv[1], "--port") == 0) {
-      serv_addr.sin_port = htons(atoi(argv[2]));
-    }
-  }
 
   if (bind(server_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) != 0) {
     printf("Bind failed: %s \n", strerror(errno));
@@ -193,8 +227,9 @@ int main(int argc, char **argv) {
                              (socklen_t *)&client_addr_len)) > 0) {
     printf("Client connected\n");
 
+    client c = {client_fd, master};
     pthread_t thread;
-    pthread_create(&thread, NULL, (void *)send_ping, &client_fd);
+    pthread_create(&thread, NULL, (void *)send_ping, &c);
     pthread_detach(thread);
   }
 
