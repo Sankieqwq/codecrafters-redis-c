@@ -1,12 +1,21 @@
 #include <errno.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
+void send_ping(void *client_fd) {
+  int client = *(int *)client_fd;
+  char buffer[1024];
+  char *message = "+PONG\r\n";
+  while (read(client, buffer, 1024) != 0) {
+    send(client, message, strlen(message), 0);
+  }
+}
 int main() {
   // Disable output buffering
   setbuf(stdout, NULL);
@@ -55,18 +64,17 @@ int main() {
   printf("Waiting for a client to connect...\n");
   client_addr_len = sizeof(client_addr);
 
-  int client_fd =
-      accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
-  printf("Client connected\n");
+  int client_fd;
+  while ((client_fd = accept(server_fd, (struct sockaddr *)&client_addr,
+                             (socklen_t *)&client_addr_len)) > 0) {
+    printf("Client connected\n");
 
-  char buffer[1024];
-  char *message = "+PONG\r\n";
-  while (read(client_fd, buffer, 1024) != 0) {
-	
-    send(client_fd, message, strlen(message), 0);
+    pthread_t thread;
+    pthread_create(&thread, NULL, (void *)send_ping, &client_fd);
   }
 
   close(server_fd);
+  pthread_exit(NULL);
 
   return 0;
 }
