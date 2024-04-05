@@ -123,11 +123,11 @@ void send_ping(void *client_fd) {
           break;
         }
       }
-      char message[1024] = {0};
       if (val == NULL) {
         char *message = "$-1\r\n";
         send(client_f, message, strlen(message), 0);
       } else {
+        char message[1024] = {0};
         int len = strlen(val->value);
         int cnt = 0;
         for (int i = len; i > 0; i /= 10) {
@@ -138,12 +138,19 @@ void send_ping(void *client_fd) {
       }
     } else if (strcasecmp(res[0], "INFO") == 0) {
       if (strcasecmp(res[1], "replication") == 0) {
-        char *message;
+        char message[1024] = {0};
+        int j, siz;
         if (c.is_master) {
-          message = "$11\r\nrole:master\r\n";
+          siz = 11 + 54 + 20 + 4;
+          j = sprintf(message, "$%d\r\nrole:master\r\n", siz);
         } else {
-          message = "$10\r\nrole:slave\r\n";
+          siz = 10 + 54 + 20 + 4;
+          j = sprintf(message, "$%d\r\nrole:slave\r\n", siz);
         }
+        j += sprintf(message + j,
+                     "master_replid:"
+                     "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb\r\n");
+        j += sprintf(message + j, "master_repl_offset:0\r\n");
         send(client_f, message, strlen(message), 0);
       }
     }
