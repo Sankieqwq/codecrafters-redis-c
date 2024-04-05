@@ -127,6 +127,11 @@ void send_ping(void *client_fd) {
         sprintf(message, "$%d\r\n%s\r\n", len, val->value);
         send(client, message, len + cnt + 5, 0);
       }
+    } else if (strcasecmp(res[0], "INFO") == 0) {
+      if (strcasecmp(res[1], "replication") == 0) {
+        char *message = "$11\r\nrole:master\r\n";
+        send(client, message, strlen(message), 0);
+      }
     }
   }
 }
