@@ -8,12 +8,51 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+int parser(char **read, char result[][128], int size_read) {
+  int res_idx = 0;
+  for (int i = 0; i < size_read; i++) {
+    if (read[i][0] == '*')
+      continue;
+    int len = 0, idx = 0;
+    while (read[i][idx] == '\r' || read[i][idx] == '\n')
+      idx++;
+    while (read[i][idx] >= '0' && read[i][idx] <= '9') {
+      len *= 10;
+      len += read[i][idx] - '0';
+      idx++;
+    }
+    while (read[i][idx] == '\r' || read[i][idx] == '\n')
+      idx++;
+    for (int j = idx; j < idx + len; j++) {
+      result[res_idx][j - idx] = read[i][j];
+    }
+    res_idx++;
+  }
+  return 0;
+}
+
 void send_ping(void *client_fd) {
   int client = *(int *)client_fd;
   char buffer[1024];
-  char *message = "+PONG\r\n";
   while (read(client, buffer, 1024) != 0) {
+    char *command[1024];
+    int idx = 0;
+    command[0] = strtok(buffer, "$");
+    while (command[idx] != NULL) {
+      idx++;
+      command[idx] = strtok(NULL, "$");
+    }
+    char res[128][128];
+    parser(command, res, idx);
+    if (strcasecmp(res[0], "PING") == 0) {
+    char *message = "+PONG\r\n";
     send(client, message, strlen(message), 0);
+    } else if (strcasecmp(res[0], "ECHO") == 0) {
+      int len = strlen(res[1]);
+      char message[1024] = {0};
+      sprintf(message, "$%d\r\n%s\r\n", len, res[1]);
+      send(client, message, len + 6, 0);
+    }
   }
 }
 int main() {
@@ -71,6 +110,7 @@ int main() {
 
     pthread_t thread;
     pthread_create(&thread, NULL, (void *)send_ping, &client_fd);
+    pthread_detach(thread);
   }
 
   close(server_fd);
