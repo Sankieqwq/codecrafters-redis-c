@@ -1,3 +1,4 @@
+#include <arpa/inet.h>
 #include <errno.h>
 #include <getopt.h>
 #include <netinet/in.h>
@@ -173,14 +174,18 @@ int main(int argc, char **argv) {
   int c = 0;
   int port = 6379;
   int master = 1;
+  char *master_host = NULL;
+  int master_port = 0;
 
   while (EOF != (c = getopt_long(argc, argv, "p:r:", long_options, &index))) {
     switch (c) {
     case 'p':
-      port = atoi(argv[2]);
+      port = atoi(argv[optind - 1]);
       break;
     case 'r':
       master = 0;
+      master_host = argv[optind - 1];
+      master_port = atoi(argv[optind]);
       break;
     case '?':
       printf("unknow option:%c\n", optopt);
@@ -193,6 +198,35 @@ int main(int argc, char **argv) {
   //
   int server_fd, client_addr_len;
   struct sockaddr_in client_addr;
+
+  if (!master) {
+    int master_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (master_fd == -1) {
+      printf("Socket creation to master failed: %s...\n", strerror(errno));
+      return 1;
+    }
+    struct sockaddr_in master_addr = {
+        .sin_family = AF_INET,
+        .sin_port = htons(master_port),
+        .sin_addr = {htonl(INADDR_ANY)},
+    };
+    if(strcmp(master_host, "localhost")==0){
+      master_host = "127.0.0.1";
+    }
+    if (inet_pton(AF_INET, master_host, &master_addr.sin_addr) <= 0) {
+      printf("Invalid master address / Address not supported");
+      close(master_fd);
+      return 1;
+    }
+    if (connect(master_fd, (const struct sockaddr *)&master_addr,
+                sizeof(master_addr)) != 0) {
+      printf("Master connection failed");
+      close(master_fd);
+      return 1;
+    }
+    send(master_fd, "*1\r\n$4\r\nping\r\n", strlen("*1\r\n$4\r\nping\r\n"),0);
+    printf("send");
+  }
 
   server_fd = socket(AF_INET, SOCK_STREAM, 0);
   if (server_fd == -1) {
